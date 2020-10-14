@@ -124,7 +124,7 @@ impl std::str::FromStr for Responce {
             _ => return Err(ResponceParseError::InvalidPart),
         }
 
-        let mut abspath = munch!(parts);
+        let abspath = munch!(parts);
         let head_commit_hash = munch!(parts);
         let local_branch = munch!(parts);
         let upstream_branch = munch!(parts);
@@ -243,6 +243,7 @@ impl GitStatusd {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn it_works() {
@@ -251,7 +252,8 @@ mod tests {
 
     #[test]
     fn pickup_gsd() {
-        let gsd = GitStatusd::new("./gitstatusd/usrbin/gitstatusd", ".").unwrap();
+        let gsd =
+            GitStatusd::new("./gitstatusd/usrbin/gitstatusd", ".").unwrap();
     }
 
     #[test]
@@ -305,5 +307,42 @@ mod tests {
     #[test]
     fn parse_responce_empty() {
         responce_test("", Err(ResponceParseError::TooShort));
+    }
+
+    #[test]
+    fn parse_responce_git_full() {
+        responce_test(
+            "id\u{1f}1\u{1f}/Users/nixon/dev/rs/gitstatusd\u{1f}1c9be4fe5460a30e70de9cbf99c3ec7064296b28\u{1f}master\u{1f}\u{1f}\u{1f}\u{1f}\u{1f}7\u{1f}0\u{1f}1\u{1f}0\u{1f}1\u{1f}0\u{1f}0\u{1f}0\u{1f}\u{1f}0\u{1f}0\u{1f}0\u{1f}\u{1f}\u{1f}0\u{1f}0\u{1f}0\u{1f}0",
+            Ok(Responce {
+                id: "id".to_owned(),
+                inner: ResponceInner::Git(ResponceGit{
+                    abspath: "/Users/nixon/dev/rs/gitstatusd".to_owned(),
+                    head_commit_hash: "1c9be4fe5460a30e70de9cbf99c3ec7064296b28".to_owned(),
+                    local_branch: "master".to_owned(),
+                    upstream_branch: "".to_owned(),
+                    remote_name: "".to_owned(),
+                    remote_url: "".to_owned(),
+                    repository_state: "".to_owned(),
+                    num_files_in_index: 7,
+                    num_staged_changes: 0,
+                    num_unstaged_changes: 1,
+                    num_conflicted_changes: 0,
+                    num_untrached_files: 1,
+                    commits_ahead: 0,
+                    commits_behind: 0,
+                    num_stashes: 0,
+                    last_tag: "".to_owned(),
+                    num_unstaged_deleted: 0,
+                    num_staged_new: 0,
+                    num_staged_deleted: 0,
+                    push_remote_name: "".to_owned(),
+                    push_remote_url: "".to_owned(),
+                    commits_ahead_push_remote: 0,
+                    commits_behind_push_remote: 0,
+                    num_index_skip_worktree: 0,
+                    num_index_assume_unchanged: 0,
+                })
+            })
+        );
     }
 }

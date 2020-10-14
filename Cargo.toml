@@ -11,3 +11,6 @@ license = "ISC"
 description = "Bindings to gitstatusd"
 [dependencies]
 
+[dev-dependencies]
+pretty_assertions = "0.6.1"
+
