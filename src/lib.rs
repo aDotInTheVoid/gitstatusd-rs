@@ -1,4 +1,10 @@
-use std::{ffi::OsStr, fmt, io, path::Path, process};
+use std::{
+    ffi::OsStr,
+    fmt,
+    io::{self, BufRead, Write},
+    path::Path,
+    process,
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // Responce
@@ -108,6 +114,13 @@ macro_rules! munch {
 impl std::str::FromStr for Responce {
     type Err = ResponceParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Responce::from_str(s)
+    }
+}
+
+impl Responce {
+    // TODO: Make this run on &[u8]
+    fn from_str(s: &str) -> Result<Self, ResponceParseError> {
         let mut parts = s.split("\x1f");
         let id = munch!(parts);
         let is_repo = munch!(parts);
@@ -199,6 +212,7 @@ pub enum ReadIndex {
 
 pub struct Request {
     // TODO: Are these always utf-8
+    // TODO: borrow these
     pub id: String,
     pub dir: String,
     pub read_index: ReadIndex,
@@ -223,7 +237,7 @@ impl fmt::Display for Request {
 pub struct GitStatusd {
     proc: process::Child,
     stdin: process::ChildStdin,
-    stdout: process::ChildStdout,
+    stdout: io::BufReader<process::ChildStdout>,
     stderr: process::ChildStderr,
 }
 
@@ -243,10 +257,9 @@ impl GitStatusd {
             io::ErrorKind::BrokenPipe,
             "Couldn't obtain stdin",
         ))?;
-        let stdout = proc.stdout.take().ok_or(io::Error::new(
-            io::ErrorKind::BrokenPipe,
-            "Couldn't obtain stdout",
-        ))?;
+        let stdout = io::BufReader::new(proc.stdout.take().ok_or(
+            io::Error::new(io::ErrorKind::BrokenPipe, "Couldn't obtain stdout"),
+        )?);
         let stderr = proc.stderr.take().ok_or(io::Error::new(
             io::ErrorKind::BrokenPipe,
             "Couldn't obtain stderr",
@@ -258,6 +271,21 @@ impl GitStatusd {
             stdout,
             stderr,
         })
+    }
+
+    //TODO: Better Error Handling
+    pub fn request(&mut self, r: Request) -> io::Result<Responce> {
+        write!(self.stdin, "{}", r)?;
+        let mut read = Vec::with_capacity(256);
+        self.stdout.read_until(0x1e, &mut read)?;
+        assert_eq!(read.last(), Some(&0x1e));
+        // Drop the controll byte
+        read.truncate(read.len().saturating_sub(1));
+
+        // TODO: Handle error
+        let read = String::from_utf8(read).unwrap();
+        let responce = Responce::from_str(&read).unwrap();
+        Ok(responce)
     }
 }
 
@@ -366,5 +394,18 @@ mod tests {
                 })
             })
         );
+    }
+
+    #[test]
+    fn run_this_dir_is_git() {
+        let req = Request {
+            id: "Request1".to_owned(),
+            dir: env!("CARGO_MANIFEST_DIR").to_owned(),
+            read_index: ReadIndex::ReadAll,
+        };
+        let mut gsd =
+            GitStatusd::new("./gitstatusd/usrbin/gitstatusd", ".").unwrap();
+        let responce = gsd.request(req).unwrap();
+        assert!(matches!(responce.inner, ResponceInner::Git(_)));
     }
 }
