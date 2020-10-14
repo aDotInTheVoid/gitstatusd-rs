@@ -4,6 +4,7 @@ use std::{ffi::OsStr, fmt, io, path::Path, process};
 // Responce
 ///////////////////////////////////////////////////////////////////////////////
 
+#[derive(Debug, PartialEq)]
 pub struct Responce {
     /// Request id. The same as the first field in the request.
     pub id: String,
@@ -12,6 +13,7 @@ pub struct Responce {
 }
 
 /// Most of a responce, depending on if we were in git.
+#[derive(Debug, PartialEq)]
 pub enum ResponceInner {
     /// We arn't in git
     NotGit,
@@ -22,6 +24,7 @@ pub enum ResponceInner {
 /// Details about git state.
 ///
 /// Note: Renamed files are reported as deleted plus new.
+#[derive(Debug, PartialEq)]
 pub struct ResponceGit {
     /// Absolute path to the git repository workdir.
     pub abspath: String,
@@ -78,6 +81,7 @@ pub struct ResponceGit {
     pub num_index_assume_unchanged: u32,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum ResponceParseError {
     /// Not Enought Parts were recieved
     TooShort,
@@ -267,5 +271,39 @@ mod tests {
         };
         let to_send = format!("{}", req);
         assert_eq!(to_send, "SomeOtherID\x1fsome/other/path\x1f1\x1e");
+    }
+
+    #[test]
+    fn parse_responce_no_git() {
+        let resp1 = "id1\x1f0";
+        let r1p = resp1.parse();
+        assert_eq!(
+            r1p,
+            Ok(Responce {
+                id: "id1".to_owned(),
+                inner: ResponceInner::NotGit,
+            })
+        );
+    }
+
+    fn responce_test(s: &str, resp: Result<Responce, ResponceParseError>) {
+        let r_got = s.parse();
+        assert_eq!(r_got, resp);
+    }
+
+    #[test]
+    fn parse_responce_no_git_no_id() {
+        responce_test(
+            "\x1f0",
+            Ok(Responce {
+                id: "".to_owned(),
+                inner: ResponceInner::NotGit,
+            }),
+        );
+    }
+
+    #[test]
+    fn parse_responce_empty() {
+        responce_test("", Err(ResponceParseError::TooShort));
     }
 }
