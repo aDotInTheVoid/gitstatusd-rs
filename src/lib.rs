@@ -1,3 +1,7 @@
+//TODO: Serde Support
+//TODO: Clean up docs
+//TODO: Build instructions
+
 use std::{
     ffi::OsStr,
     fmt,
@@ -218,6 +222,7 @@ pub struct Request {
     pub read_index: ReadIndex,
 }
 
+// TODO, this should probably work for non utf8.
 impl fmt::Display for Request {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
@@ -235,13 +240,17 @@ impl fmt::Display for Request {
 ///////////////////////////////////////////////////////////////////////////////
 
 pub struct GitStatusd {
-    proc: process::Child,
+    // I need to store the child so it's pipes don't close
+    _proc: process::Child,
     stdin: process::ChildStdin,
     stdout: io::BufReader<process::ChildStdout>,
-    stderr: process::ChildStderr,
+    // TODO: decide if I need this
+    _stderr: process::ChildStderr,
 }
 
 impl GitStatusd {
+    // TODO: does the path matter
+    // TODO: binary detection
     pub fn new<C: AsRef<OsStr> + Default, P: AsRef<Path>>(
         name: C,
         path: P,
@@ -266,14 +275,16 @@ impl GitStatusd {
         ))?;
 
         Ok(GitStatusd {
-            proc,
+            _proc: proc,
             stdin,
             stdout,
-            stderr,
+            _stderr: stderr,
         })
     }
 
     //TODO: Better Error Handling
+    //TODO: Non blocking version
+    //TODO: Id generation
     pub fn request(&mut self, r: Request) -> io::Result<Responce> {
         write!(self.stdin, "{}", r)?;
         let mut read = Vec::with_capacity(256);
@@ -283,6 +294,7 @@ impl GitStatusd {
         read.truncate(read.len().saturating_sub(1));
 
         // TODO: Handle error
+        // TODO: Check the id's are the same.
         let read = String::from_utf8(read).unwrap();
         let responce = Responce::from_str(&read).unwrap();
         Ok(responce)
