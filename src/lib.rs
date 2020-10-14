@@ -2,6 +2,25 @@
 //TODO: Clean up docs
 //TODO: Build instructions
 
+
+//! Bindings to [gitstatusd](https://github.com/romkatv/gitstatus)
+//!
+//! *gitstatusd* is a c++ binary that provides extreamly fast alternative
+//! to `git status`. This project is a library that make comunicating with
+//! that binary easier.
+//!
+//! ```no_run
+//! let mut gsd = gitstatusd::SatusDaemon::new("/Users/nixon/bin/gitstatusd", ".").unwrap();
+//! let req = gitstatusd::StatusRequest {
+//!     id: "".to_owned(),
+//!     dir: "/Users/nixon/dev/rs/gitstatusd".to_owned(),
+//!     read_index:  gitstatusd::ReadIndex::ReadAll,
+//! };
+//! let rsp = gsd.request(req).unwrap();
+//! assert_eq!(rsp.details.unwrap().commits_ahead, 0);
+//! ```
+
+
 use std::{
     ffi::OsStr,
     fmt,
