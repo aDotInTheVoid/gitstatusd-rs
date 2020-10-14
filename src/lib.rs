@@ -222,6 +222,9 @@ impl fmt::Display for Request {
 
 pub struct GitStatusd {
     proc: process::Child,
+    stdin: process::ChildStdin,
+    stdout: process::ChildStdout,
+    stderr: process::ChildStderr,
 }
 
 impl GitStatusd {
@@ -229,13 +232,31 @@ impl GitStatusd {
         name: C,
         path: P,
     ) -> io::Result<GitStatusd> {
+        let mut proc = process::Command::new(name)
+            .current_dir(path)
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .spawn()?;
+
+        let stdin = proc.stdin.take().ok_or(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "Couldn't obtain stdin",
+        ))?;
+        let stdout = proc.stdout.take().ok_or(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "Couldn't obtain stdout",
+        ))?;
+        let stderr = proc.stderr.take().ok_or(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "Couldn't obtain stderr",
+        ))?;
+
         Ok(GitStatusd {
-            proc: process::Command::new(name)
-                .current_dir(path)
-                .stdin(process::Stdio::piped())
-                .stdout(process::Stdio::piped())
-                .stderr(process::Stdio::piped())
-                .spawn()?,
+            proc,
+            stdin,
+            stdout,
+            stderr,
         })
     }
 }
@@ -252,8 +273,9 @@ mod tests {
 
     #[test]
     fn pickup_gsd() {
-        let gsd =
-            GitStatusd::new("./gitstatusd/usrbin/gitstatusd", ".").unwrap();
+        let gsd = GitStatusd::new("./gitstatusd/usrbin/gitstatusd", ".");
+
+        assert!(gsd.is_ok());
     }
 
     #[test]
