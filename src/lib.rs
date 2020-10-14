@@ -15,27 +15,24 @@ use std::{
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Debug, PartialEq)]
-pub struct Responce {
+/// The result of a request for the git status. 
+///
+/// If the request was inside a git reposity, `details` will contain a 
+/// `GitDetails` with the results
+pub struct GitStatus {
     /// Request id. The same as the first field in the request.
     pub id: String,
     /// The inner responce.
-    pub inner: ResponceInner,
+    pub details: Option<GitDetails>,
 }
 
-/// Most of a responce, depending on if we were in git.
-#[derive(Debug, PartialEq)]
-pub enum ResponceInner {
-    /// We arn't in git
-    NotGit,
-    /// We're in it, details inside.
-    Git(ResponceGit),
-}
+
 
 /// Details about git state.
 ///
 /// Note: Renamed files are reported as deleted plus new.
 #[derive(Debug, PartialEq)]
-pub struct ResponceGit {
+pub struct GitDetails {
     /// Absolute path to the git repository workdir.
     pub abspath: String,
     /// Commit hash that HEAD is pointing to. 40 hex digits.
@@ -92,6 +89,7 @@ pub struct ResponceGit {
 }
 
 #[derive(Debug, PartialEq)]
+/// An error if the responce from gitstatusd couldn't be parsed
 pub enum ResponceParseError {
     /// Not Enought Parts were recieved
     TooShort,
@@ -115,14 +113,14 @@ macro_rules! munch {
     };
 }
 
-impl std::str::FromStr for Responce {
+impl std::str::FromStr for GitStatus {
     type Err = ResponceParseError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Responce::from_str(s)
+        GitStatus::from_str(s)
     }
 }
 
-impl Responce {
+impl GitStatus {
     // TODO: Make this run on &[u8]
     fn from_str(s: &str) -> Result<Self, ResponceParseError> {
         let mut parts = s.split("\x1f");
@@ -130,9 +128,9 @@ impl Responce {
         let is_repo = munch!(parts);
         match is_repo {
             "0" => {
-                return Ok(Responce {
+                return Ok(GitStatus {
                     id: id.to_owned(),
-                    inner: ResponceInner::NotGit,
+                    details: Option::None,
                 })
             }
             // 1 indicated a git repo, so we do the real stuff
@@ -169,7 +167,7 @@ impl Responce {
         let num_index_assume_unchanged: u32 = munch!(parts).parse()?;
 
         // Only do ownership once we have all the stuff
-        let git_part = ResponceGit {
+        let git_part = GitDetails {
             abspath: abspath.to_owned(),
             head_commit_hash: head_commit_hash.to_owned(),
             local_branch: local_branch.to_owned(),
@@ -197,9 +195,9 @@ impl Responce {
             num_index_assume_unchanged,
         };
 
-        Ok(Responce {
+        Ok(GitStatus {
             id: id.to_owned(),
-            inner: ResponceInner::Git(git_part),
+            details: Option::Some(git_part),
         })
     }
 }
@@ -209,21 +207,31 @@ impl Responce {
 ///////////////////////////////////////////////////////////////////////////////
 
 #[derive(Copy, Clone, Debug, Hash)]
+/// Tell gitstatusd weather or not to read the git index
 pub enum ReadIndex {
+    /// default behavior of computing everything
     ReadAll = 0,
+    /// Disables computation of anything that requires reading git index
     DontRead = 1,
 }
 
-pub struct Request {
+/// A Request to be sent to the demon.
+pub struct StatusRequest {
     // TODO: Are these always utf-8
     // TODO: borrow these
+    /// The request Id, can be blank
     pub id: String,
+    /// Path to the directory for which git stats are being requested.
+    ///
+    /// If the first character is ':', it is removed and the remaning path is 
+    /// treated as GIT_DIR.
     pub dir: String,
+    /// Wether or not to read the git index
     pub read_index: ReadIndex,
 }
 
 // TODO, this should probably work for non utf8.
-impl fmt::Display for Request {
+impl fmt::Display for StatusRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -239,7 +247,11 @@ impl fmt::Display for Request {
 // Status
 ///////////////////////////////////////////////////////////////////////////////
 
-pub struct GitStatusd {
+/// The daemon that gets `git status`
+///
+/// Idealy have one long running Daemon that is long running, so gitstatusd can
+/// take advantage of incremental stuff
+pub struct SatusDaemon {
     // I need to store the child so it's pipes don't close
     _proc: process::Child,
     stdin: process::ChildStdin,
@@ -248,15 +260,19 @@ pub struct GitStatusd {
     _stderr: process::ChildStderr,
 }
 
-impl GitStatusd {
+impl SatusDaemon {
     // TODO: does the path matter
     // TODO: binary detection
+    /// Create a new status demon.
+    ///
+    /// - `bin_path`: The path to the `gitstatusd` binary.
+    /// - `run_dir`: The directory to run the binary in.
     pub fn new<C: AsRef<OsStr> + Default, P: AsRef<Path>>(
-        name: C,
-        path: P,
-    ) -> io::Result<GitStatusd> {
-        let mut proc = process::Command::new(name)
-            .current_dir(path)
+        bin_path: C,
+        run_dir: P,
+    ) -> io::Result<SatusDaemon> {
+        let mut proc = process::Command::new(bin_path)
+            .current_dir(run_dir)
             .stdin(process::Stdio::piped())
             .stdout(process::Stdio::piped())
             .stderr(process::Stdio::piped())
@@ -274,7 +290,7 @@ impl GitStatusd {
             "Couldn't obtain stderr",
         ))?;
 
-        Ok(GitStatusd {
+        Ok(SatusDaemon {
             _proc: proc,
             stdin,
             stdout,
@@ -285,7 +301,8 @@ impl GitStatusd {
     //TODO: Better Error Handling
     //TODO: Non blocking version
     //TODO: Id generation
-    pub fn request(&mut self, r: Request) -> io::Result<Responce> {
+    /// Get the git status
+    pub fn request(&mut self, r: StatusRequest) -> io::Result<GitStatus> {
         write!(self.stdin, "{}", r)?;
         let mut read = Vec::with_capacity(256);
         self.stdout.read_until(0x1e, &mut read)?;
@@ -296,7 +313,7 @@ impl GitStatusd {
         // TODO: Handle error
         // TODO: Check the id's are the same.
         let read = String::from_utf8(read).unwrap();
-        let responce = Responce::from_str(&read).unwrap();
+        let responce = GitStatus::from_str(&read).unwrap();
         Ok(responce)
     }
 }
@@ -313,14 +330,14 @@ mod tests {
 
     #[test]
     fn pickup_gsd() {
-        let gsd = GitStatusd::new("./gitstatusd/usrbin/gitstatusd", ".");
+        let gsd = SatusDaemon::new("./gitstatusd/usrbin/gitstatusd", ".");
 
         assert!(gsd.is_ok());
     }
 
     #[test]
     fn write_request() {
-        let req = Request {
+        let req = StatusRequest {
             id: "SomeID".to_owned(),
             dir: "some/path".to_owned(),
             read_index: ReadIndex::ReadAll,
@@ -328,7 +345,7 @@ mod tests {
         let to_send = format!("{}", req);
         assert_eq!(to_send, "SomeID\x1fsome/path\x1f0\x1e");
 
-        let req = Request {
+        let req = StatusRequest {
             id: "SomeOtherID".to_owned(),
             dir: "some/other/path".to_owned(),
             read_index: ReadIndex::DontRead,
@@ -343,14 +360,14 @@ mod tests {
         let r1p = resp1.parse();
         assert_eq!(
             r1p,
-            Ok(Responce {
+            Ok(GitStatus {
                 id: "id1".to_owned(),
-                inner: ResponceInner::NotGit,
+                details: Option::None,
             })
         );
     }
 
-    fn responce_test(s: &str, resp: Result<Responce, ResponceParseError>) {
+    fn responce_test(s: &str, resp: Result<GitStatus, ResponceParseError>) {
         let r_got = s.parse();
         assert_eq!(r_got, resp);
     }
@@ -359,9 +376,9 @@ mod tests {
     fn parse_responce_no_git_no_id() {
         responce_test(
             "\x1f0",
-            Ok(Responce {
+            Ok(GitStatus {
                 id: "".to_owned(),
-                inner: ResponceInner::NotGit,
+                details: Option::None,
             }),
         );
     }
@@ -375,9 +392,9 @@ mod tests {
     fn parse_responce_git_full() {
         responce_test(
             "id\u{1f}1\u{1f}/Users/nixon/dev/rs/gitstatusd\u{1f}1c9be4fe5460a30e70de9cbf99c3ec7064296b28\u{1f}master\u{1f}\u{1f}\u{1f}\u{1f}\u{1f}7\u{1f}0\u{1f}1\u{1f}0\u{1f}1\u{1f}0\u{1f}0\u{1f}0\u{1f}\u{1f}0\u{1f}0\u{1f}0\u{1f}\u{1f}\u{1f}0\u{1f}0\u{1f}0\u{1f}0",
-            Ok(Responce {
+            Ok(GitStatus {
                 id: "id".to_owned(),
-                inner: ResponceInner::Git(ResponceGit{
+                details: Option::Some(GitDetails{
                     abspath: "/Users/nixon/dev/rs/gitstatusd".to_owned(),
                     head_commit_hash: "1c9be4fe5460a30e70de9cbf99c3ec7064296b28".to_owned(),
                     local_branch: "master".to_owned(),
@@ -410,14 +427,14 @@ mod tests {
 
     #[test]
     fn run_this_dir_is_git() {
-        let req = Request {
+        let req = StatusRequest {
             id: "Request1".to_owned(),
             dir: env!("CARGO_MANIFEST_DIR").to_owned(),
             read_index: ReadIndex::ReadAll,
         };
         let mut gsd =
-            GitStatusd::new("./gitstatusd/usrbin/gitstatusd", ".").unwrap();
+            SatusDaemon::new("./gitstatusd/usrbin/gitstatusd", ".").unwrap();
         let responce = gsd.request(req).unwrap();
-        assert!(matches!(responce.inner, ResponceInner::Git(_)));
+        assert!(matches!(responce.details, Option::Some(_)));
     }
 }
