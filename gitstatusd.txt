@@ -1,0 +1,169 @@
+Usage: gitstatusd [OPTION]...
+Print machine-readable status of the git repos for directores in stdin.
+
+OPTIONS
+  -l, --lock-fd=NUM [default=-1]
+   If non-negative, check whether the specified file descriptor is locked when
+   not receiving any requests for one second; exit if it isn't locked.
+
+  -p, --parent-pid=NUM [default=-1]
+   If non-negative, send signal 0 to the specified PID when not receiving any
+   requests for one second; exit if signal sending fails.
+
+  -t, --num-threads=NUM [default=1]
+   Use this many threads to scan git workdir for unstaged and untracked files.
+   Empirically, setting this parameter to twice the number of virtual CPU yields
+   maximum performance.
+
+  -v, --log-level=STR [default=INFO]
+   Don't write entires to log whose log level is below this. Log levels in
+   increasing order: DEBUG, INFO, WARN, ERROR, FATAL.
+
+  -r, --repo-ttl-seconds=NUM [default=3600]
+   Close git repositories that haven't been used for this long. This is meant to
+   release resources such as memory and file descriptors. The next request for a
+   repo that's been closed is much slower than for a repo that hasn't been.
+   Negative value means infinity.
+
+  -s, --max-num-staged=NUM [default=1]
+   Report at most this many staged changes; negative value means infinity.
+
+  -u, --max-num-unstaged=NUM [default=1]
+   Report at most this many unstaged changes; negative value means infinity.
+
+  -d, --max-num-untracked=NUM [default=1]
+   Report at most this many untracked files; negative value means infinity.
+
+  -m, --dirty-max-index-size=NUM [default=-1]
+   If a repo has more files in its index than this, override --max-num-unstaged
+   and --max-num-untracked (but not --max-num-staged) with zeros; negative value
+   means infinity.
+
+  -e, --recurse-untracked-dirs
+   Count files within untracked directories like `git status --untracked-files`.
+
+  -U, --ignore-status-show-untracked-files
+   Unless this option is specified, report zero untracked files for repositories
+   with status.showUntrackedFiles = false.
+
+  -W, --ignore-bash-show-untracked-files
+   Unless this option is specified, report zero untracked files for repositories
+   with bash.showUntrackedFiles = false.
+
+  -D, --ignore-bash-show-dirty-state
+   Unless this option is specified, report zero staged, unstaged and conflicted
+   changes for repositories with bash.showDirtyState = false.
+
+  -V, --version
+   Print gitstatusd version and exit.
+
+  -G, --version-glob=STR [default=*]
+   Immediately exit with code 11 if gitstatusd version (see --version) doesn't
+   does not match the specified pattern. Matching is done with fnmatch(3)
+   without flags.
+
+  -h, --help
+  Display this help and exit.
+
+INPUT
+
+  Requests are read from stdin, separated by ascii 30 (record separator). Each
+  request is made of the following fields, in the specified order, separated by
+  ascii 31 (unit separator):
+
+    1. Request ID. Any string. Can be empty.
+    2. Path to the directory for which git stats are being requested.
+       If the first character is ':', it is removed and the remaning path
+       is treated as GIT_DIR.
+    3. (Optional) '1' to disable computation of anything that requires reading
+       git index; '0' for the default behavior of computing everything.
+
+OUTPUT
+
+  For every request read from stdin there is response written to stdout.
+  Responses are separated by ascii 30 (record separator). Each response is made
+  of the following fields, in the specified order, separated by ascii 31
+  (unit separator):
+
+     1. Request id. The same as the first field in the request.
+     2. 0 if the directory isn't a git repo, 1 otherwise. If 0, all the
+        following fields are missing.
+     3. Absolute path to the git repository workdir.
+     4. Commit hash that HEAD is pointing to. 40 hex digits.
+     5. Local branch name or empty if not on a branch.
+     6. Upstream branch name. Can be empty.
+     7. The remote name, e.g. "upstream" or "origin".
+     8. Remote URL. Can be empty.
+     9. Repository state, A.K.A. action. Can be empty.
+    10. The number of files in the index.
+    11. The number of staged changes.
+    12. The number of unstaged changes.
+    13. The number of conflicted changes.
+    14. The number of untracked files.
+    15. Number of commits the current branch is ahead of upstream.
+    16. Number of commits the current branch is behind upstream.
+    17. The number of stashes.
+    18. The last tag (in lexicographical order) that points to the same
+        commit as HEAD.
+    19. The number of unstaged deleted files.
+    20. The number of staged new files.
+    21. The number of staged deleted files.
+    22. The push remote name, e.g. "upstream" or "origin".
+    23. Push remote URL. Can be empty.
+    24. Number of commits the current branch is ahead of push remote.
+    25. Number of commits the current branch is behind push remote.
+    26. Number of files in the index with skip-worktree bit set.
+    27. Number of files in the index with assume-unchanged bit set.
+
+Note: Renamed files are reported as deleted plus new.
+
+EXAMPLE
+
+  Send a single request and print response (zsh syntax):
+
+    local req_id=id
+    local dir=$PWD
+    echo -nE $req_id$'\x1f'$dir$'\x1e' | ./gitstatusd | {
+      local resp
+      IFS=$'\x1f' read -rd $'\x1e' -A resp && print -lr -- "${(@qq)resp}"
+    }
+
+  Output:
+    'id'
+    '1'
+    '/home/romka/gitstatus'
+    'bf46bf03dbab7108801b53f8a720caee8464c9c3'
+    'master'
+    'master'
+    'origin'
+    'git@github.com:romkatv/gitstatus.git'
+    ''
+    '70'
+    '1'
+    '0'
+    '0'
+    '2'
+    '0'
+    '0'
+    ''
+    '0'
+    '0'
+    '0'
+    ''
+    ''
+    '0'
+    '0'
+    '0'
+    '0'
+
+EXIT STATUS
+
+  The command returns zero on success (when printing help or on EOF),
+  non-zero on failure. In the latter case the output is unspecified.
+
+COPYRIGHT
+
+  Copyright 2019 Roman Perepelitsa
+  This is free software; see https://github.com/romkatv/gitstatus for copying
+  conditions. There is NO warranty; not even for MERCHANTABILITY or FITNESS FOR
+  A PARTICULAR PURPOSE.
